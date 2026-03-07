@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.0.0 - 2026-03-07
+### Breaking
+* Wings now initializes a local `servers.json` control-plane store under the system root directory instead of creating the Panel remote API client at startup.
+* `POST /api/servers` now expects local-control payloads that include `settings` and `process_configuration`, with optional `installation_script` and `skip_install` fields.
+
+### Added
+* Added a local control-plane client that persists server definitions on disk and serves configuration, installation script, state-change, and SFTP validation requests without a Panel round-trip.
+* Added `PUT /api/servers/:server` to update a locally managed server definition and resync the running server in place.
+* Server API responses now include `process_configuration` to support local-control consumers.
+
+### Changed
+* Deleting a locally managed server now also removes its persisted server definition.
+* Server sync now reapplies the filesystem denylist when configuration changes are loaded.
+* Startup and state-change logging now refer to the configured control plane instead of the Panel.
+
 ## v1.2.0 - 2026-03-07
 ### Changed
 * Restic backup and snapshot endpoints now accept request-scoped repository credentials instead of relying on static configuration.

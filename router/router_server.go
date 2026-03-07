@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Minenetpro/pelican-wings/environment"
+	"github.com/Minenetpro/pelican-wings/remote"
 	"github.com/Minenetpro/pelican-wings/router/downloader"
 	"github.com/Minenetpro/pelican-wings/router/middleware"
 	"github.com/Minenetpro/pelican-wings/router/tokens"
@@ -353,6 +354,13 @@ func deleteServer(c *gin.Context) {
 	middleware.ExtractManager(c).Remove(func(server *server.Server) bool {
 		return server.ID() == s.ID()
 	})
+
+	if store, ok := middleware.ExtractApiClient(c).(remote.LocalServerStore); ok {
+		if err := store.DeleteServer(c.Request.Context(), s.ID()); err != nil {
+			middleware.CaptureAndAbort(c, err)
+			return
+		}
+	}
 
 	c.Status(http.StatusNoContent)
 }

@@ -47,7 +47,7 @@ var (
 
 var rootCommand = &cobra.Command{
 	Use:   "wings",
-	Short: "Runs the API server allowing programmatic control of game servers for Pelican Panel.",
+	Short: "Runs the API server allowing programmatic control of game servers.",
 	PreRun: func(cmd *cobra.Command, args []string) {
 		initConfig()
 		initLogging()
@@ -153,15 +153,11 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		return
 	}
 
-	t := config.Get().Token
-	pclient := remote.New(
-		config.Get().PanelLocation,
-		remote.WithCredentials(t.ID, t.Token),
-		remote.WithCustomHeaders(config.Get().RemoteQuery.CustomHeaders),
-		remote.WithHttpClient(&http.Client{
-			Timeout: time.Second * time.Duration(config.Get().RemoteQuery.Timeout),
-		}),
-	)
+	pclient, err := remote.NewLocal(config.Get().System.RootDirectory)
+	if err != nil {
+		log.WithField("error", err).Fatal("failed to initialize local server store")
+		return
+	}
 
 	if err := database.Initialize(); err != nil {
 		log.WithField("error", err).Fatal("failed to initialize database")
@@ -323,11 +319,12 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 	}()
 
 	go func() {
-		log.Info("updating server states on Panel: marking installing/restoring servers as normal")
-		// Update all the servers on the Panel to be in a valid state if they're
+		log.Info("updating server states on the configured control plane: marking installing/restoring servers as normal")
+		// Update all the servers on the configured control plane to be in a valid
+		// state if they're
 		// currently marked as installing/restoring now that Wings is restarted.
 		if err := pclient.ResetServersState(cmd.Context()); err != nil {
-			log.WithField("error", err).Error("failed to reset server states on Panel: some instances may be stuck in an installing/restoring state unexpectedly")
+			log.WithField("error", err).Error("failed to reset server states on the configured control plane: some instances may be stuck in an installing/restoring state unexpectedly")
 		}
 	}()
 
@@ -356,8 +353,8 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		"host_port":    api.Port,
 	}).Info("configuring internal webserver")
 
-	// Create a new HTTP server instance to handle inbound requests from the Panel
-	// and external clients.
+	// Create a new HTTP server instance to handle inbound requests from the
+	// control plane and external clients.
 	s := &http.Server{
 		Addr:      api.Host + ":" + strconv.Itoa(api.Port),
 		Handler:   router.Configure(manager, pclient),

@@ -264,7 +264,10 @@ func (s *Server) Sync() error {
 
 	// Update the disk space limits for the server whenever the configuration for
 	// it changes.
-	s.fs.SetDiskLimit(s.DiskSpace())
+	if s.fs != nil {
+		s.fs.SetDiskLimit(s.DiskSpace())
+		s.fs.SetDenylist(s.Config().Egg.FileDenylist)
+	}
 
 	s.SyncWithEnvironment()
 
@@ -430,12 +433,12 @@ func (s *Server) OnStateChange() {
 		}(s)
 	}
 
-	// Push status update to Panel
+	// Push status update to the configured control plane.
 	sc := remote.ServerStateChange{PrevState: prevState, NewState: st}
-	s.Log().WithField("state_change", sc).Debug("pushing server status change to panel")
+	s.Log().WithField("state_change", sc).Debug("pushing server status change to control plane")
 	err := s.client.PushServerStateChange(context.Background(), s.ID(), sc)
 	if err != nil {
-		s.Log().WithField("error", err).Error("error pushing server status change to panel")
+		s.Log().WithField("error", err).Error("error pushing server status change to control plane")
 	}
 }
 
@@ -452,20 +455,22 @@ func (s *Server) IsRunning() bool {
 // instance on Wings. This includes the information needed by the Panel in order
 // to show resource utilization and the current state on this system.
 type APIResponse struct {
-	State         string        `json:"state"`
-	IsSuspended   bool          `json:"is_suspended"`
-	Utilization   ResourceUsage `json:"utilization"`
-	Configuration Configuration `json:"configuration"`
+	State                string                       `json:"state"`
+	IsSuspended          bool                         `json:"is_suspended"`
+	Utilization          ResourceUsage                `json:"utilization"`
+	Configuration        Configuration                `json:"configuration"`
+	ProcessConfiguration *remote.ProcessConfiguration `json:"process_configuration,omitempty"`
 }
 
 // ToAPIResponse returns the server struct as an API object that can be consumed
 // by callers.
 func (s *Server) ToAPIResponse() APIResponse {
 	return APIResponse{
-		State:         s.Environment.State(),
-		IsSuspended:   s.IsSuspended(),
-		Utilization:   s.Proc(),
-		Configuration: *s.Config(),
+		State:                s.Environment.State(),
+		IsSuspended:          s.IsSuspended(),
+		Utilization:          s.Proc(),
+		Configuration:        *s.Config(),
+		ProcessConfiguration: s.ProcessConfiguration(),
 	}
 }
 

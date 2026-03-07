@@ -92,6 +92,14 @@ func (fs *Filesystem) UnixFS() *ufs.UnixFS {
 	return fs.unixFS.UnixFS
 }
 
+// SetDenylist replaces the active ignore rules for this filesystem.
+func (fs *Filesystem) SetDenylist(denylist []string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	fs.denylist = ignore.CompileIgnoreLines(denylist...)
+}
+
 // Touch acts by creating the given file and path on the disk if it is not present
 // already. If  it is present, the file is opened using the defaults which will truncate
 // the contents. The opened file is then returned to the caller.

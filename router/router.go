@@ -86,6 +86,7 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
 		serverExisting.Use(middleware.ServerExists())
 		{
 			serverExisting.GET("", getServer)
+			serverExisting.PUT("", putServer)
 			serverExisting.DELETE("", deleteServer)
 
 			serverExisting.GET("/logs", getServerLogs)
