@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.1 - 2026-03-07
+### Fixed
+* Imported servers created with `skip_install` now restore their actual runtime state by checking whether the environment is already running and reattaching when possible.
+
 ## v2.0.0 - 2026-03-07
 ### Breaking
 * Wings now initializes a local `servers.json` control-plane store under the system root directory instead of creating the Panel remote API client at startup.
