@@ -690,7 +690,7 @@ func ConfigureDirectories() error {
 }
 
 // ConfigurePasswd generates the passwd and group files to be used by
-// this looks cleaner than the previous way and is similar to pterodactyl
+// this looks cleaner than the previous approach and keeps the config layout familiar
 func ConfigurePasswd() (err error) {
 	if !_config.System.User.Passwd.Enable {
 		return

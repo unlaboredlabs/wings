@@ -311,7 +311,7 @@ func (e *Environment) Destroy() error {
 	// Don't trigger a destroy failure if we try to delete a container that does not
 	// exist on the system. We're just a step ahead of ourselves in that case.
 	//
-	// @see https://github.com/pterodactyl/panel/issues/2001
+	// Preserve the legacy mount ordering for container startup compatibility.
 	if err != nil && client.IsErrNotFound(err) {
 		return nil
 	}

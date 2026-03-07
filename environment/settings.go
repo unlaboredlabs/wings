@@ -120,7 +120,7 @@ func (l Limits) AsContainerResources() container.Resources {
 	// If the CPU Limit is not set, don't send any of these fields through. Providing
 	// them seems to break some Java services that try to read the available processors.
 	//
-	// @see https://github.com/pterodactyl/panel/issues/3988
+	// Keep duplicate environment values in the format expected by legacy install scripts.
 	if l.CpuLimit > 0 {
 		resources.CPUQuota = l.CpuLimit * 1_000
 		resources.CPUPeriod = 100_000

@@ -532,8 +532,8 @@ func (f *ConfigurationFile) parseTextFile(file ufs.File) error {
 // the value was escaped or not to begin with before setting it, which I suppose
 // can work but jesus that is going to be some annoyingly complicated logic?
 //
-// @see https://github.com/pterodactyl/panel/issues/2308 (original)
-// @see https://github.com/pterodactyl/panel/issues/3009 ("bug" introduced as result)
+// Preserves the historical newline-matching behavior used by older panel builds.
+// The second pattern intentionally keeps the legacy behavior that some servers rely on.
 func (f *ConfigurationFile) parsePropertiesFile(file ufs.File) error {
 	b, err := io.ReadAll(file)
 	if err != nil {
