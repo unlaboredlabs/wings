@@ -12,6 +12,7 @@ dependencies, and allowing users to authenticate with the same credentials they 
 ## Documentation
 
 - **[Local Documentation](docs/DOCUMENTATION.md)** - Comprehensive documentation for this modified version
+- **[Secure Deployment Guide](docs/SECURE_DEPLOYMENT.md)** - End-to-end host installation and `gVisor` configuration for secure shared-node deployment
 - [Panel Documentation](https://pelican.dev/docs/panel/getting-started)
 - [Wings Documentation](https://pelican.dev/docs/wings/install)
 - Or, get additional help [via Discord](https://discord.gg/pelican-panel)

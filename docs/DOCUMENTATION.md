@@ -20,6 +20,10 @@
 16. [Integrations](#integrations)
 17. [Development](#development)
 
+Additional guides:
+
+- [Secure Deployment Guide](SECURE_DEPLOYMENT.md)
+
 ---
 
 ## Overview
@@ -87,7 +91,7 @@ flowchart TB
         ServerManager --> Instances
 
         subgraph Instances["Server Instances"]
-            subgraph Docker["Docker Environment (pelican0 bridge network)"]
+            subgraph Docker["Docker Environment (per-server bridge networks)"]
                 ServerA["Server A (Container)"]
                 ServerB["Server B (Container)"]
                 ServerC["Server C (Container)"]
@@ -149,6 +153,10 @@ wings configure
 # Or copy configuration from Panel
 # Place config.yml in /etc/pelican/config.yml
 ```
+
+For secure shared-node deployments with untrusted tenants, do not use the containerized compose example. Install Wings directly on the host and follow the dedicated secure deployment guide:
+
+- [Secure Deployment Guide](SECURE_DEPLOYMENT.md)
 
 ### Systemd Service
 
@@ -1840,10 +1848,17 @@ wings --auto-tls --tls-hostname wings.example.com
 
 ### Container Isolation
 
-- Docker container sandboxing
+- gVisor-backed `runsc` runtime for tenant workloads
 - Resource limits (CPU, memory, disk)
-- Network isolation (pelican0 bridge)
-- User namespacing (optional rootless)
+- Per-server bridge network isolation
+- Read-only root filesystem and `no-new-privileges`
+- `cap_drop=ALL` for tenant workloads
+- Digest-pinned images only in secure mode
+- Custom host mounts and `force_outgoing_ip` disabled in secure mode
+
+For the supported secure deployment topology and host installation steps, see:
+
+- [Secure Deployment Guide](SECURE_DEPLOYMENT.md)
 
 ---
 
@@ -1944,7 +1959,16 @@ system:
 
 # Docker Configuration
 docker:
+  # Secure shared-node deployments should keep this set to `runsc`.
+  runtime: runsc
+  apparmor_profile: docker-default
+  seccomp_profile: ""
   network:
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    network_mtu: 1500
+    # Secure tenant workloads use per-server bridge networks instead of one shared bridge.
     name: pelican0
     driver: bridge
     interfaces:
@@ -1968,7 +1992,7 @@ remote_query:
   boot_servers_per_page: 50
   custom_headers: {}
 
-# Allowed host mounts
+# Allowed host mounts. Secure tenant workloads reject custom mounts.
 allowed_mounts: []
 
 # File search configuration

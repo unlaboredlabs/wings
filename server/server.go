@@ -293,6 +293,12 @@ func (s *Server) SyncWithConfiguration(cfg remote.ServerConfigurationResponse) e
 	if err := json.Unmarshal(cfg.Settings, &c); err != nil {
 		return errors.WithStackIf(err)
 	}
+	if err := validateSecureConfiguration(&c); err != nil {
+		return errors.WithStackIf(err)
+	}
+
+	// Tenant-supplied runtime labels are not supported in the secure shared-node model.
+	c.Labels = map[string]string{}
 
 	s.cfg.mu.Lock()
 	defer s.cfg.mu.Unlock()

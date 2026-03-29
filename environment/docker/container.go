@@ -15,7 +15,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	dockerImage "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 
 	"github.com/Minenetpro/pelican-wings/config"
@@ -156,26 +155,18 @@ func (e *Environment) Create() error {
 	a := e.Configuration.Allocations()
 	evs := e.Configuration.EnvironmentVariables()
 
-	// If port is 0 then we have a server with no allocation and this should stay 127.0.0.1 and not the docker network interface ip.
-	if a.DefaultMapping.Port != 0 {
-		for i, v := range evs {
-			// Convert 127.0.0.1 to the pelican0 network interface if the environment is Docker
-			// so that the server operates as expected.
-			if v == "SERVER_IP=127.0.0.1" {
-				evs[i] = "SERVER_IP=" + cfg.Docker.Network.Interface
-			}
+	for i, v := range evs {
+		// In the secure shared-node model workloads bind inside an isolated bridge network and
+		// are exposed through explicit host port publishing.
+		if v == "SERVER_IP=127.0.0.1" {
+			evs[i] = "SERVER_IP=0.0.0.0"
 		}
 	}
 
-	// Merge user-provided labels with system labels
-	confLabels := e.Configuration.Labels()
-	labels := make(map[string]string, 2+len(confLabels))
-
-	for key := range confLabels {
-		labels[key] = confLabels[key]
+	networkName, err := EnsureSecureNetwork(ctx, e.client, e.Id)
+	if err != nil {
+		return err
 	}
-	labels["Service"] = "Pelican"
-	labels["ContainerType"] = "server_process"
 
 	conf := &container.Config{
 		Hostname:     e.Id,
@@ -187,8 +178,12 @@ func (e *Environment) Create() error {
 		Tty:          true,
 		ExposedPorts: a.Exposed(),
 		Image:        strings.TrimPrefix(e.meta.Image, "~"),
-		Env:          e.Configuration.EnvironmentVariables(),
-		Labels:       labels,
+		Env:          evs,
+		Labels: map[string]string{
+			"Service":         "Pelican",
+			"ContainerType":   "server_process",
+			"SecurityProfile": "sandboxed_gvisor",
+		},
 	}
 
 	// Set the user running the container properly depending on what mode we are operating in.
@@ -196,41 +191,6 @@ func (e *Environment) Create() error {
 		conf.User = fmt.Sprintf("%d:%d", cfg.System.User.Rootless.ContainerUID, cfg.System.User.Rootless.ContainerGID)
 	} else {
 		conf.User = strconv.Itoa(cfg.System.User.Uid) + ":" + strconv.Itoa(cfg.System.User.Gid)
-	}
-
-	networkMode := container.NetworkMode(cfg.Docker.Network.Mode)
-	if a.ForceOutgoingIP {
-		// We can't use ForceOutgoingIP if we made a server with no allocation
-		if a.DefaultMapping.Port != 0 {
-			enableIPv6 := false
-			e.log().Debug("environment/docker: forcing outgoing IP address")
-			networkName := "ip-" + strings.ReplaceAll(strings.ReplaceAll(a.DefaultMapping.Ip, ".", "-"), ":", "-")
-			networkMode = container.NetworkMode(networkName)
-
-			if _, err := e.client.NetworkInspect(ctx, networkName, network.InspectOptions{}); err != nil {
-				if !client.IsErrNotFound(err) {
-					return err
-				}
-
-				if _, err := e.client.NetworkCreate(ctx, networkName, network.CreateOptions{
-					Driver:     "bridge",
-					EnableIPv6: &enableIPv6,
-					Internal:   false,
-					Attachable: false,
-					Ingress:    false,
-					ConfigOnly: false,
-					Options: map[string]string{
-						"encryption": "false",
-						"com.docker.network.bridge.default_bridge": "false",
-						"com.docker.network.host_ipv4":             a.DefaultMapping.Ip,
-					},
-				}); err != nil {
-					return err
-				}
-			}
-		} else {
-			e.log().Warn("environment/docker: Cannot force outgoing IP - server has no allocation")
-		}
 	}
 
 	hostConf := &container.HostConfig{
@@ -258,36 +218,15 @@ func (e *Environment) Create() error {
 		// about anything else in it.
 		LogConfig: cfg.Docker.ContainerLogConfig(),
 
-		SecurityOpt:    []string{"no-new-privileges"},
+		SecurityOpt:    cfg.Docker.SecurityOptions(),
 		ReadonlyRootfs: true,
-		CapDrop: []string{
-			"setpcap", "mknod", "audit_write", "net_raw", "dac_override",
-			"fowner", "fsetid", "net_bind_service", "sys_chroot", "setfcap",
-			"sys_ptrace",
-		},
-		NetworkMode: networkMode,
-		UsernsMode:  container.UsernsMode(cfg.Docker.UsernsMode),
+		CapDrop:        []string{"ALL"},
+		NetworkMode:    container.NetworkMode(networkName),
+		CgroupnsMode:   container.CgroupnsModePrivate,
+		Runtime:        cfg.Docker.Runtime,
 	}
 
-	var netConf *network.NetworkingConfig = nil //In case when no networking config is needed set nil
-	var serverNetConfig = config.Get().Docker.Network
-	if "macvlan" == serverNetConfig.Driver { //Generate networking config for macvlan driver
-		var defaultMapping = e.Config().Allocations().DefaultMapping
-		e.log().Debug("Set macvlan " + serverNetConfig.Name + " IP to " + defaultMapping.Ip)
-		netConf = &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				serverNetConfig.Name: { //Get network name from wings config
-					IPAMConfig: &network.EndpointIPAMConfig{
-						IPv4Address: defaultMapping.Ip,
-					},
-					IPAddress: defaultMapping.Ip, //Use default mapping ip address (wings support only one network per server)
-					Gateway:   serverNetConfig.Interfaces.V4.Gateway,
-				},
-			},
-		}
-	}
-	// Pass the networkings configuration or nil if none required
-	if _, err := e.client.ContainerCreate(ctx, conf, hostConf, netConf, nil, e.Id); err != nil {
+	if _, err := e.client.ContainerCreate(ctx, conf, hostConf, nil, nil, e.Id); err != nil {
 		return errors.Wrap(err, "environment/docker: failed to create container")
 	}
 
@@ -313,7 +252,14 @@ func (e *Environment) Destroy() error {
 	//
 	// Preserve the legacy mount ordering for container startup compatibility.
 	if err != nil && client.IsErrNotFound(err) {
-		return nil
+		err = nil
+	}
+
+	if nerr := RemoveSecureNetwork(context.Background(), e.client, e.Id); nerr != nil {
+		if err == nil {
+			return nerr
+		}
+		e.log().WithField("error", nerr).Warn("failed to remove secure network after container removal")
 	}
 
 	return err

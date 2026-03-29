@@ -81,6 +81,17 @@ type DockerConfiguration struct {
 
 	UsePerformantInspect bool `default:"true" json:"use_performant_inspect" yaml:"use_performant_inspect"`
 
+	// Runtime is the OCI runtime used for tenant workloads. In the secure shared-node
+	// model this should point at a gVisor-backed runtime such as "runsc".
+	Runtime string `default:"runsc" json:"runtime" yaml:"runtime"`
+
+	// ApparmorProfile is applied explicitly to all tenant workload containers.
+	ApparmorProfile string `default:"docker-default" json:"apparmor_profile" yaml:"apparmor_profile"`
+
+	// SeccompProfile can be used to pin a custom seccomp profile path. When blank,
+	// Docker's default seccomp profile is used.
+	SeccompProfile string `default:"" json:"seccomp_profile" yaml:"seccomp_profile"`
+
 	// Sets the user namespace mode for the container when user namespace remapping option is
 	// enabled.
 	//
@@ -107,6 +118,20 @@ func (c DockerConfiguration) ContainerLogConfig() container.LogConfig {
 		Type:   c.LogConfig.Type,
 		Config: c.LogConfig.Config,
 	}
+}
+
+func (c DockerConfiguration) SecurityOptions() []string {
+	opts := []string{"no-new-privileges"}
+
+	if c.ApparmorProfile != "" {
+		opts = append(opts, "apparmor="+c.ApparmorProfile)
+	}
+
+	if c.SeccompProfile != "" {
+		opts = append(opts, "seccomp="+c.SeccompProfile)
+	}
+
+	return opts
 }
 
 // RegistryConfiguration defines the authentication credentials for a given

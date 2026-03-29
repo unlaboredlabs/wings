@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"html/template"
 	"io"
 	"os"
@@ -17,12 +18,12 @@ import (
 	dockerImage "github.com/docker/docker/api/types/image"
 
 	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/parsers/kernel"
 
 	"github.com/Minenetpro/pelican-wings/config"
 	"github.com/Minenetpro/pelican-wings/environment"
+	dockerenv "github.com/Minenetpro/pelican-wings/environment/docker"
 	"github.com/Minenetpro/pelican-wings/remote"
 	"github.com/Minenetpro/pelican-wings/system"
 )
@@ -237,6 +238,10 @@ func (ip *InstallationProcess) writeScriptToDisk() error {
 
 // Pulls the docker image to be used for the installation container.
 func (ip *InstallationProcess) pullInstallationImage() error {
+	if err := validateSecureImageReference(ip.Script.ContainerImage); err != nil {
+		return err
+	}
+
 	// Get a registry auth configuration from the config.
 	var registryAuth *config.RegistryConfiguration
 	for registry, c := range config.Get().Docker.Registries {
@@ -426,12 +431,24 @@ func (ip *InstallationProcess) Execute() (string, error) {
 		Image:        ip.Script.ContainerImage,
 		Env:          ip.Server.GetEnvironmentVariables(),
 		Labels: map[string]string{
-			"Service":       "Pelican",
-			"ContainerType": "server_installer",
+			"Service":         "Pelican",
+			"ContainerType":   "server_installer",
+			"SecurityProfile": "sandboxed_gvisor",
 		},
 	}
 
 	cfg := config.Get()
+	if cfg.System.User.Rootless.Enabled {
+		conf.User = fmt.Sprintf("%d:%d", cfg.System.User.Rootless.ContainerUID, cfg.System.User.Rootless.ContainerGID)
+	} else {
+		conf.User = strconv.Itoa(cfg.System.User.Uid) + ":" + strconv.Itoa(cfg.System.User.Gid)
+	}
+
+	networkName, err := dockerenv.EnsureSecureNetwork(ctx, ip.client, ip.Server.ID())
+	if err != nil {
+		return "", err
+	}
+
 	tmpfsSize := strconv.Itoa(int(cfg.Docker.TmpfsSize))
 	hostConf := &container.HostConfig{
 		Mounts: []mount.Mount{
@@ -452,10 +469,14 @@ func (ip *InstallationProcess) Execute() (string, error) {
 		Tmpfs: map[string]string{
 			"/tmp": "rw,exec,nosuid,size=" + tmpfsSize + "M",
 		},
-		DNS:         cfg.Docker.Network.Dns,
-		LogConfig:   cfg.Docker.ContainerLogConfig(),
-		NetworkMode: container.NetworkMode(cfg.Docker.Network.Mode),
-		UsernsMode:  container.UsernsMode(cfg.Docker.UsernsMode),
+		DNS:            cfg.Docker.Network.Dns,
+		LogConfig:      cfg.Docker.ContainerLogConfig(),
+		SecurityOpt:    cfg.Docker.SecurityOptions(),
+		ReadonlyRootfs: true,
+		CapDrop:        []string{"ALL"},
+		NetworkMode:    container.NetworkMode(networkName),
+		CgroupnsMode:   container.CgroupnsModePrivate,
+		Runtime:        cfg.Docker.Runtime,
 	}
 
 	// Ensure the root directory for the server exists properly before attempting
@@ -476,25 +497,7 @@ func (ip *InstallationProcess) Execute() (string, error) {
 		}
 	}()
 
-	var netConf *network.NetworkingConfig = nil //In case when no networking config is needed set nil
-	var serverNetConfig = config.Get().Docker.Network
-	if "macvlan" == serverNetConfig.Driver { //Generate networking config for macvlan driver
-		var defaultMapping = ip.Server.Config().Allocations.DefaultMapping
-		ip.Server.Log().Debug("Set macvlan " + serverNetConfig.Name + " IP to " + defaultMapping.Ip)
-		netConf = &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				serverNetConfig.Name: { //Get network name from wings config
-					IPAMConfig: &network.EndpointIPAMConfig{
-						IPv4Address: defaultMapping.Ip,
-					},
-					IPAddress: defaultMapping.Ip, //Use default mapping ip address (wings support only one network per server)
-					Gateway:   serverNetConfig.Interfaces.V4.Gateway,
-				},
-			},
-		}
-	}
-	// Pass the networkings configuration or nil if none required
-	r, err := ip.client.ContainerCreate(ctx, conf, hostConf, netConf, nil, ip.Server.ID()+"_installer")
+	r, err := ip.client.ContainerCreate(ctx, conf, hostConf, nil, nil, ip.Server.ID()+"_installer")
 	if err != nil {
 		return "", err
 	}
@@ -578,11 +581,6 @@ func (ip *InstallationProcess) resourceLimits() container.Resources {
 	}
 
 	resources := cfg.AsContainerResources()
-	// Explicitly remove the PID limits for the installation container. These scripts are
-	// defined at an administrative level and users can't manually execute things like a
-	// fork bomb during this process.
-	resources.PidsLimit = nil
-
 	return resources
 }
 
