@@ -19,4 +19,4 @@ dependencies, and allowing users to authenticate with the same credentials they 
 
 ## Reporting Issues
 
-Feel free to report any wings specific issues or feature requests in [GitHub Issues](https://github.com/pelican-dev/wings/issues/new).
+Feel free to report any wings specific issues or feature requests in [GitHub Issues](https://github.com/minenetpro/pelican-wings/issues/new).

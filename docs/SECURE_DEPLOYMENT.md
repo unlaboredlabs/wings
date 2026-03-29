@@ -207,7 +207,7 @@ If Docker reports that the runtime is unknown, the runtime registration step did
 Download the Wings binary and place it on the host:
 
 ```bash
-sudo curl -L https://github.com/pelican-dev/wings/releases/latest/download/wings_linux_amd64 \
+sudo curl -L https://github.com/minenetpro/pelican-wings/releases/latest/download/wings_linux_amd64 \
   -o /usr/local/bin/wings
 sudo chmod +x /usr/local/bin/wings
 sudo mkdir -p /etc/pelican

@@ -141,7 +141,7 @@ flowchart TB
 
 ```bash
 # Download the latest release
-curl -L https://github.com/pelican-dev/wings/releases/latest/download/wings_linux_amd64 -o /usr/local/bin/wings
+curl -L https://github.com/minenetpro/pelican-wings/releases/latest/download/wings_linux_amd64 -o /usr/local/bin/wings
 chmod +x /usr/local/bin/wings
 
 # Create configuration directory
@@ -2236,14 +2236,14 @@ For detailed schema documentation, Axiom query examples, and operational notes, 
 
 ```bash
 # Clone repository
-git clone https://github.com/pelican-dev/wings.git
-cd wings
+git clone https://github.com/minenetpro/pelican-wings.git
+cd pelican-wings
 
 # Build
 go build -o wings
 
 # Build with version info
-go build -ldflags "-s -w -X github.com/pelican-dev/wings/system.Version=$(git describe --tags)" -o wings
+go build -ldflags "-s -w -X github.com/Minenetpro/pelican-wings/system.Version=$(git describe --tags)" -o wings
 ```
 
 ### Running Tests
