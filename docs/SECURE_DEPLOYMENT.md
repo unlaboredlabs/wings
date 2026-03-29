@@ -213,13 +213,17 @@ sudo chmod +x /usr/local/bin/wings
 sudo mkdir -p /etc/pelican
 ```
 
-Generate or place the node configuration:
+Generate the local node configuration:
 
 ```bash
-sudo /usr/local/bin/wings configure --config-path /etc/pelican/config.yml
+sudo /usr/local/bin/wings configure \
+  --config-path /etc/pelican/config.yml \
+  --allowed-origin https://control.example.com
 ```
 
-Or place the node configuration from the Panel at:
+The command writes a local config file and generates API credentials for Wings. Store the printed token securely if an external control plane will call the node API.
+
+Or place your own config file at:
 
 ```text
 /etc/pelican/config.yml
@@ -227,7 +231,7 @@ Or place the node configuration from the Panel at:
 
 ## Step 7: Configure Wings for Secure Shared-Node Operation
 
-Start with the Panel-generated config and then set the secure runtime fields explicitly.
+Start with the generated local config and then set the secure runtime fields explicitly.
 
 Minimum secure runtime settings:
 

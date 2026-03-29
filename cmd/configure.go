@@ -1,51 +1,57 @@
 package cmd
 
 import (
-	"crypto/tls"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
-	"path"
-	"regexp"
-	"time"
+	"path/filepath"
+	"strings"
 
-	"github.com/charmbracelet/huh"
-	"github.com/goccy/go-json"
 	"github.com/Minenetpro/pelican-wings/config"
+	"github.com/charmbracelet/huh"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 var configureArgs struct {
-	PanelURL      string
+	AllowedOrigin string
+	TokenID       string
 	Token         string
 	ConfigPath    string
-	Node          string
 	Override      bool
+	PanelURL      string
+	Node          string
 	AllowInsecure bool
 }
 
 var configureCmd = &cobra.Command{
 	Use:   "configure",
-	Short: "Use a token to configure wings automatically",
+	Short: "Generate a local Wings configuration",
 	Run:   configureCmdRun,
 }
 
 func init() {
-	configureCmd.PersistentFlags().StringVarP(&configureArgs.PanelURL, "panel-url", "p", "", "The base URL for this daemon's panel")
-	configureCmd.PersistentFlags().StringVarP(&configureArgs.Token, "token", "t", "", "The API key to use for fetching node information")
-	configureCmd.PersistentFlags().StringVarP(&configureArgs.Node, "node", "n", "", "The ID of the node which will be connected to this daemon")
+	configureCmd.PersistentFlags().StringVar(&configureArgs.AllowedOrigin, "allowed-origin", "", "Allowed browser origin for CORS and websocket access")
+	configureCmd.PersistentFlags().StringVar(&configureArgs.TokenID, "token-id", "", "Identifier associated with the Wings API token (auto-generated if empty)")
+	configureCmd.PersistentFlags().StringVarP(&configureArgs.Token, "token", "t", "", "Authentication token for Wings API requests (auto-generated if empty)")
 	configureCmd.PersistentFlags().StringVarP(&configureArgs.ConfigPath, "config-path", "c", config.DefaultLocation, "The path where the configuration file should be made")
 	configureCmd.PersistentFlags().BoolVar(&configureArgs.Override, "override", false, "Set to true to override an existing configuration for this node")
-	configureCmd.PersistentFlags().BoolVar(&configureArgs.AllowInsecure, "allow-insecure", false, "Set to true to disable certificate checking")
+	configureCmd.PersistentFlags().StringVarP(&configureArgs.PanelURL, "panel-url", "p", "", "Deprecated alias for --allowed-origin")
+	configureCmd.PersistentFlags().StringVarP(&configureArgs.Node, "node", "n", "", "Deprecated no-op flag")
+	configureCmd.PersistentFlags().BoolVar(&configureArgs.AllowInsecure, "allow-insecure", false, "Deprecated no-op flag")
+	_ = configureCmd.PersistentFlags().MarkDeprecated("panel-url", "use --allowed-origin if you need to allow a browser origin")
+	_ = configureCmd.PersistentFlags().MarkDeprecated("node", "the local setup flow no longer uses node IDs")
+	_ = configureCmd.PersistentFlags().MarkDeprecated("allow-insecure", "the local setup flow does not fetch remote configuration")
+	_ = configureCmd.PersistentFlags().MarkHidden("panel-url")
+	_ = configureCmd.PersistentFlags().MarkHidden("node")
+	_ = configureCmd.PersistentFlags().MarkHidden("allow-insecure")
 }
 
 func configureCmdRun(cmd *cobra.Command, args []string) {
-	if configureArgs.AllowInsecure {
-		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
+	if configureArgs.AllowedOrigin == "" {
+		configureArgs.AllowedOrigin = strings.TrimSpace(configureArgs.PanelURL)
 	}
 
 	if _, err := os.Stat(configureArgs.ConfigPath); err == nil && !configureArgs.Override {
@@ -66,130 +72,90 @@ func configureCmdRun(cmd *cobra.Command, args []string) {
 	} else if err != nil && !os.IsNotExist(err) {
 		panic(err)
 	}
-	var fields []huh.Field
 
-	if err := validateField("url", configureArgs.PanelURL); err != nil {
-		fields = append(fields, huh.NewInput().
-			Title("Panel URL: ").
-			Validate(func(str string) error {
-				return validateField("url", str)
-			}).
-			Value(&configureArgs.PanelURL),
-		)
-	}
-
-	if err := validateField("token", configureArgs.Token); err != nil {
-		fields = append(fields, huh.NewInput().
-			Title("API Token: ").
-			Validate(func(str string) error {
-				return validateField("token", str)
-			}).
-			Value(&configureArgs.Token),
-		)
-	}
-
-	if err := validateField("node", configureArgs.Node); err != nil {
-		fields = append(fields, huh.NewInput().
-			Title("Node ID: ").
-			Validate(func(str string) error {
-				return validateField("node", str)
-			}).
-			Value(&configureArgs.Node),
-		)
-	}
-	if len(fields) > 0 {
-		if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
-			if err == huh.ErrUserAborted {
-				return
-			}
-			panic(err)
-		}
-	}
-
-	c := &http.Client{
-		Timeout: time.Second * 30,
-	}
-
-	req, err := getRequest()
-	if err != nil {
+	if err := validateAllowedOrigin(configureArgs.AllowedOrigin); err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("%+v %s\n", req.Header, req.URL.String())
-
-	res, err := c.Do(req)
-	if err != nil {
-		fmt.Println("Failed to fetch configuration from the panel.\n", err.Error())
-		os.Exit(1)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized {
-		fmt.Println("The authentication credentials provided were not valid.")
-		os.Exit(1)
-	} else if res.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(res.Body)
-
-		fmt.Println("An error occurred while processing this request.\n", string(b))
-		os.Exit(1)
-	}
-
-	b, err := io.ReadAll(res.Body)
-
-	cfg, err := config.NewAtPath(configPath)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(configureArgs.ConfigPath), 0o755); err != nil {
 		panic(err)
 	}
 
-	if err := json.Unmarshal(b, cfg); err != nil {
+	cfg, generatedTokenID, generatedToken, err := newLocalConfiguration(
+		configureArgs.ConfigPath,
+		configureArgs.TokenID,
+		configureArgs.Token,
+		configureArgs.AllowedOrigin,
+	)
+	if err != nil {
 		panic(err)
 	}
-
-	// Manually specify the Panel URL as it won't be decoded from JSON.
-	cfg.PanelLocation = configureArgs.PanelURL
 
 	if err = config.WriteToDisk(cfg); err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Successfully configured wings.")
+	fmt.Printf("Successfully wrote local Wings configuration to %s.\n", configureArgs.ConfigPath)
+	fmt.Println("Wings API credentials:")
+	fmt.Printf("  token_id: %s\n", cfg.AuthenticationTokenId)
+	fmt.Printf("  token: %s\n", cfg.AuthenticationToken)
+	if generatedTokenID || generatedToken {
+		fmt.Println("Store these credentials securely. They are required for authenticated API access.")
+	}
+	if configureArgs.AllowedOrigin == "" {
+		fmt.Println("No browser origin was configured. If a web UI is hosted on a different origin, set `allowed_origins` or rerun with --allowed-origin.")
+	}
 }
 
-func getRequest() (*http.Request, error) {
-	u, err := url.Parse(configureArgs.PanelURL)
+func newLocalConfiguration(configPath, tokenID, token, allowedOrigin string) (*config.Configuration, bool, bool, error) {
+	cfg, err := config.NewAtPath(configPath)
 	if err != nil {
-		panic(err)
+		return nil, false, false, err
 	}
 
-	u.Path = path.Join(u.Path, fmt.Sprintf("api/application/nodes/%s/configuration", configureArgs.Node))
-
-	r, err := http.NewRequest(http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
+	generatedTokenID := false
+	if tokenID == "" {
+		tokenID = uuid.NewString()
+		generatedTokenID = true
 	}
 
-	r.Header.Set("Accept", "application/json")
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", configureArgs.Token))
+	generatedToken := false
+	if token == "" {
+		token, err = generateToken(32)
+		if err != nil {
+			return nil, false, false, err
+		}
+		generatedToken = true
+	}
 
-	return r, nil
+	cfg.Uuid = uuid.NewString()
+	cfg.AuthenticationTokenId = tokenID
+	cfg.AuthenticationToken = token
+	if allowedOrigin != "" {
+		cfg.AllowedOrigins = []string{allowedOrigin}
+	}
+
+	return cfg, generatedTokenID, generatedToken, nil
 }
 
-func validateField(name string, str string) error {
-	switch name {
-	case "url":
-		u, err := url.Parse(str)
-		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.Path != "" {
-			return fmt.Errorf("please provide a valid panel URL")
-		}
-	case "token":
-		if !regexp.MustCompile(`^(peli|papp)_(\w{43})$`).Match([]byte(str)) {
-			return fmt.Errorf("please provide a valid authentication token")
-		}
-	case "node":
-		if !regexp.MustCompile(`^(\d+)$`).Match([]byte(str)) {
-			return fmt.Errorf("please provide a valid numeric node ID")
-		}
+func generateToken(size int) (string, error) {
+	b := make([]byte, size)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func validateAllowedOrigin(origin string) error {
+	if strings.TrimSpace(origin) == "" {
+		return nil
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.Path != "" {
+		return fmt.Errorf("please provide a valid allowed origin")
+	}
+
 	return nil
 }

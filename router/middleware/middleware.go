@@ -99,7 +99,6 @@ func SetAccessControlHeaders() gin.HandlerFunc {
 	allowPrivateNetwork := cfg.AllowCORSPrivateNetwork
 
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", location)
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Authorization, Cache-Control, Content-Type, Content-Length, Origin, X-Real-IP, X-CSRF-Token")
@@ -121,14 +120,8 @@ func SetAccessControlHeaders() gin.HandlerFunc {
 		// that we allow, and if so return it explicitly. Otherwise, just return the default
 		// origin which is the same URL that the Panel is located at.
 		origin := c.GetHeader("Origin")
-		if origin != location {
-			for _, o := range origins {
-				if o != "*" && o != origin {
-					continue
-				}
-				c.Header("Access-Control-Allow-Origin", o)
-				break
-			}
+		if allowedOrigin := resolveAllowedOrigin(location, origins, origin); allowedOrigin != "" {
+			c.Header("Access-Control-Allow-Origin", allowedOrigin)
 		}
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -136,6 +129,27 @@ func SetAccessControlHeaders() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func resolveAllowedOrigin(location string, origins []string, requestOrigin string) string {
+	if requestOrigin == "" {
+		return location
+	}
+
+	if location != "" && requestOrigin == location {
+		return location
+	}
+
+	for _, origin := range origins {
+		switch origin {
+		case "*":
+			return requestOrigin
+		case requestOrigin:
+			return requestOrigin
+		}
+	}
+
+	return location
 }
 
 // ServerExists will ensure that the requested server exists in this setup.
