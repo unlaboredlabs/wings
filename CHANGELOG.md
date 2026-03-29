@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.1 - 2026-03-29
+### Fixed
+* `wings configure` now generates a local configuration directly instead of trying to fetch node configuration from the old Panel bootstrap flow.
+* Local setup now generates Wings API credentials automatically and supports an optional allowed browser origin for CORS and websocket access.
+* Setup documentation now reflects the local-control configuration flow and no longer points operators back at the removed Panel bootstrap path.
+
 ## v3.0.0 - 2026-03-29
 ### Breaking
 * Secure shared-node deployment is now the primary operating model for this fork: Wings runs directly on the host with a gVisor-backed `runsc` runtime, and the repo no longer ships Docker packaging for running Wings itself in a container.
