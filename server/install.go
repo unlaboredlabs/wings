@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"emperror.dev/errors"
@@ -123,6 +124,14 @@ type InstallationProcess struct {
 	client *client.Client
 }
 
+type installerIdentity struct {
+	containerUser string
+	scriptUID     int
+	scriptGID     int
+}
+
+type pathOwnershipFunc func(path string, uid, gid int) error
+
 // NewInstallationProcess returns a new installation process struct that will be
 // used to create containers and otherwise perform installation commands for a
 // server.
@@ -217,21 +226,97 @@ func (ip *InstallationProcess) tempDir() string {
 	return filepath.Join(config.Get().System.TmpDirectory, ip.Server.ID())
 }
 
+func (ip *InstallationProcess) installerIdentity() installerIdentity {
+	cfg := config.Get()
+	if cfg.System.User.Rootless.Enabled {
+		return installerIdentity{
+			containerUser: fmt.Sprintf("%d:%d", cfg.System.User.Rootless.ContainerUID, cfg.System.User.Rootless.ContainerGID),
+			// Rootless bind mounts are owned on the host by the Wings process user, even if
+			// the container runs as uid 0 inside its own user namespace.
+			scriptUID: os.Getuid(),
+			scriptGID: os.Getgid(),
+		}
+	}
+
+	return installerIdentity{
+		containerUser: strconv.Itoa(cfg.System.User.Uid) + ":" + strconv.Itoa(cfg.System.User.Gid),
+		scriptUID:     cfg.System.User.Uid,
+		scriptGID:     cfg.System.User.Gid,
+	}
+}
+
+func ensurePathOwnership(path string, uid, gid int) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	stat, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+
+	if int(stat.Uid) == uid && int(stat.Gid) == gid {
+		return nil
+	}
+
+	return os.Chown(path, uid, gid)
+}
+
+func relaxInstallScriptPermissions(dirPath, scriptPath string) error {
+	if err := os.Chmod(dirPath, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(scriptPath, 0o644); err != nil {
+		return err
+	}
+	return nil
+}
+
+func setInstallScriptAccess(dirPath, scriptPath string, identity installerIdentity, own pathOwnershipFunc) (error, error) {
+	if err := own(dirPath, identity.scriptUID, identity.scriptGID); err != nil {
+		if ferr := relaxInstallScriptPermissions(dirPath, scriptPath); ferr != nil {
+			return nil, errors.WithMessage(ferr, "failed to relax install script directory permissions")
+		}
+		return err, nil
+	}
+	if err := own(scriptPath, identity.scriptUID, identity.scriptGID); err != nil {
+		if ferr := relaxInstallScriptPermissions(dirPath, scriptPath); ferr != nil {
+			return nil, errors.WithMessage(ferr, "failed to relax install script permissions")
+		}
+		return err, nil
+	}
+	return nil, nil
+}
+
 // Writes the installation script to a temporary file on the host machine so that it
 // can be properly mounted into the installation container and then executed.
 func (ip *InstallationProcess) writeScriptToDisk() error {
+	identity := ip.installerIdentity()
+
 	// Make sure the temp directory root exists before trying to make a directory within it. The
 	// os.TempDir call expects this base to exist, it won't create it for you.
 	if err := os.MkdirAll(ip.tempDir(), 0o700); err != nil {
 		return errors.WithMessage(err, "could not create temporary directory for install process")
 	}
-	f, err := os.OpenFile(filepath.Join(ip.tempDir(), "install.sh"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	scriptPath := filepath.Join(ip.tempDir(), "install.sh")
+	f, err := os.OpenFile(scriptPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return errors.WithMessage(err, "failed to write server installation script to disk before mount")
 	}
-	defer f.Close()
 	if _, err := io.Copy(f, strings.NewReader(strings.ReplaceAll(ip.Script.Script, "\r\n", "\n"))); err != nil {
+		_ = f.Close()
 		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fallbackErr, err := setInstallScriptAccess(ip.tempDir(), scriptPath, identity, ensurePathOwnership)
+	if err != nil {
+		return err
+	}
+	if fallbackErr != nil {
+		ip.Server.Log().WithError(fallbackErr).Warn("failed to set ownership on temporary install script staging path; using readable fallback permissions")
 	}
 	return nil
 }
@@ -428,11 +513,8 @@ func (ip *InstallationProcess) Execute() (string, error) {
 	}
 
 	cfg := config.Get()
-	if cfg.System.User.Rootless.Enabled {
-		conf.User = fmt.Sprintf("%d:%d", cfg.System.User.Rootless.ContainerUID, cfg.System.User.Rootless.ContainerGID)
-	} else {
-		conf.User = strconv.Itoa(cfg.System.User.Uid) + ":" + strconv.Itoa(cfg.System.User.Gid)
-	}
+	identity := ip.installerIdentity()
+	conf.User = identity.containerUser
 
 	networkName, err := dockerenv.EnsureSecureNetwork(ctx, ip.client, ip.Server.ID())
 	if err != nil {
@@ -452,7 +534,7 @@ func (ip *InstallationProcess) Execute() (string, error) {
 				Target:   "/mnt/install",
 				Source:   ip.tempDir(),
 				Type:     mount.TypeBind,
-				ReadOnly: false,
+				ReadOnly: true,
 			},
 		},
 		Resources: ip.resourceLimits(),

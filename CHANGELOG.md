@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.0.2 - 2026-03-30
+### Fixed
+* Installer script staging now keeps secure owner-only permissions when Wings can assign ownership, but falls back to readable permissions instead of aborting installs on unprivileged or containerized deployments where `chown()` is unavailable.
+* Secure installer containers still mount `/mnt/install` read-only, so the fallback only restores script readability and directory traversal for startup compatibility.
+
 ## v3.0.1 - 2026-03-29
 ### Fixed
 * `wings configure` now generates a local configuration directly instead of trying to fetch node configuration from the old Panel bootstrap flow.
