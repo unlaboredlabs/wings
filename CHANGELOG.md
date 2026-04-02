@@ -6,7 +6,7 @@
 * Added node-wide `conduit.frpc_image` and `conduit.config_directory` settings so operators can control the FRP client image and where generated per-server client configs are stored.
 
 ### Changed
-* Secure server validation now accepts only supported ingress modes and requires Conduit connection details plus a valid `port_start` to `port_end` range when dedicated Conduit ingress is enabled.
+* Secure server validation now defaults omitted ingress settings to `none`, accepts only supported explicit ingress modes, and requires Conduit connection details plus a valid `port_start` to `port_end` range when dedicated Conduit ingress is enabled.
 
 ## v3.0.2 - 2026-03-30
 ### Fixed

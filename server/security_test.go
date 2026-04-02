@@ -29,6 +29,10 @@ func TestValidateSecureConfiguration(t *testing.T) {
 			config: secureTestConfig("ghcr.io/pelican-dev/example:latest"),
 		},
 		{
+			name:   "accepts omitted ingress as none",
+			config: secureTestConfig("ghcr.io/pelican-dev/example:latest"),
+		},
+		{
 			name: "rejects custom mounts",
 			config: func() Configuration {
 				c := secureTestConfig("ghcr.io/pelican-dev/example@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")

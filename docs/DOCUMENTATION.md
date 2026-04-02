@@ -1612,6 +1612,8 @@ Supported ingress modes:
 - `none`: no dedicated ingress sidecar is created.
 - `conduit_dedicated`: Wings starts a dedicated `frpc` sidecar on the server's private network and proxies each TCP port from `port_start` through `port_end`.
 
+If the `ingress` object is omitted or `mode` is empty, Wings treats it as `none`.
+
 When `mode` is `conduit_dedicated`, `server_addr`, `server_port`, `auth_token`, `port_start`, and `port_end` are required.
 
 ### Backup

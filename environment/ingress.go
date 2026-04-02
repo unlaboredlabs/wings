@@ -23,7 +23,9 @@ type Ingress struct {
 
 func (i Ingress) EffectiveMode() string {
 	switch i.Mode {
-	case ConduitDedicatedIngressMode, NoIngressMode:
+	case "", NoIngressMode:
+		return NoIngressMode
+	case ConduitDedicatedIngressMode:
 		return i.Mode
 	default:
 		return ""
